@@ -24,10 +24,6 @@
   --color-state-warning: #fbbf24;
 
   --radius: 0.75rem;
-
-  --font-heading: var(--font-geist-sans);
-  --font-sans: var(--font-geist-sans);
-
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -74,12 +70,37 @@
     border-color: var(--color-border-default);
     @apply border-border outline-ring/50;
   }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(240, 240, 244, 0.12) transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 7px;
+    height: 7px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background: rgba(240, 240, 244, 0.1);
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background-clip: padding-box;
+  }
+
+  *:hover::-webkit-scrollbar-thumb {
+    background: rgba(240, 240, 244, 0.16);
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  
   body {
     background-color: var(--color-bg-base);
     color: var(--color-text-primary);
-  }
-  html {
-    @apply font-sans;
   }
 }
 
