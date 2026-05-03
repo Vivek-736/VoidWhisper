@@ -19,7 +19,7 @@ function toSlug(name: string): string {
 }
 
 const MOCK_PROJECTS: Project[] = [
-  { id: "1", name: "Ghost AI Core", slug: "ghost-ai-core", owned: true },
+  { id: "1", name: "Void Whisper Core", slug: "void-whisper-core", owned: true },
   { id: "2", name: "Design System", slug: "design-system", owned: true },
   {
     id: "3",
