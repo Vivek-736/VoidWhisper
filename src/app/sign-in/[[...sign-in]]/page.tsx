@@ -45,7 +45,7 @@ export default function SignInPage() {
                         speed of thought.
                     </h1>
                     <p className="text-text-secondary text-base leading-relaxed mb-12 max-w-sm">
-                        Describe your architecture in plain English. Ghost AI maps it to a
+                        Describe your architecture in plain English. Void Whisper maps it to a
                         shared canvas your whole team can refine in real time.
                     </p>
                     <ul className="space-y-7">
