@@ -62,14 +62,16 @@ export function CanvasEditor({
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   const nodesRef = useRef(nodes);
-  // eslint-disable-next-line react-hooks/refs
-  nodesRef.current = nodes;
   const edgesRef = useRef(edges);
-  // eslint-disable-next-line react-hooks/refs
-  edgesRef.current = edges;
+
+  useEffect(() => {
+    nodesRef.current = nodes
+    edgesRef.current = edges
+  });
 
   useEffect(() => {
     if (!pendingTemplate) return;
+    
     const currentNodes = nodesRef.current;
     const currentEdges = edgesRef.current;
 
