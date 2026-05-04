@@ -1,65 +1,177 @@
-"use client"
+"use client";
 
-import { useCallback, useRef } from "react"
-import { ReactFlow, Background, BackgroundVariant, MiniMap, ConnectionMode } from "@xyflow/react"
-import "@xyflow/react/dist/style.css"
-import { useReactFlow } from "@xyflow/react"
-import { useLiveblocksFlow } from "@liveblocks/react-flow"
-import { CanvasNodeComponent } from "@/components/editor/canvas/canvas-node"
-import type { CanvasNode, CanvasEdge, NodeShape } from "../../../types/canvas"
-import { ShapePanel } from "@/components/editor/canvas/shape-panel"
-import { NODE_COLORS } from "../../../types/canvas"
+import { useCallback, useEffect, useRef } from "react";
+import {
+  ReactFlow,
+  Background,
+  BackgroundVariant,
+  ConnectionMode,
+  ConnectionLineType,
+  MarkerType,
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
+import type { Connection } from "@xyflow/react";
+import { useReactFlow } from "@xyflow/react";
+import { useLiveblocksFlow } from "@liveblocks/react-flow";
+import { NODE_COLORS } from "@/types/canvas";
+import type { CanvasNode, CanvasEdge, NodeShape } from "@/types/canvas";
+import { useUndo, useRedo, useCanUndo, useCanRedo } from "@liveblocks/react";
+import { CanvasNodeComponent } from "@/components/editor/canvas/canvas-node";
+import { CanvasEdgeComponent } from "@/components/editor/canvas/canvas-edge";
+import { ShapePanel } from "@/components/editor/canvas/shape-panel";
+import { CanvasControls } from "@/components/editor/canvas/canvas-controls";
+import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
+import type { CanvasTemplate } from "@/components/editor/starter-templates";
 
-const nodeTypes = { canvasNode: CanvasNodeComponent }
-const edgeTypes = {}
+const nodeTypes = { canvasNode: CanvasNodeComponent };
+const edgeTypes = { canvasEdge: CanvasEdgeComponent };
 
-let nodeCounter = 0
+const CONNECTION_LINE_STYLE: React.CSSProperties = {
+  stroke: "rgba(255,255,255,0.4)",
+  strokeWidth: 1.5,
+  strokeLinecap: "round",
+};
+
+let nodeCounter = 0;
+let edgeCounter = 0;
 
 function generateNodeId(shape: string): string {
-  return `${shape}-${Date.now()}-${++nodeCounter}`
+  return `${shape}-${Date.now()}-${++nodeCounter}`;
 }
 
-export function CanvasEditor() {
-  const { nodes, edges, onNodesChange, onEdgesChange, onConnect } = useLiveblocksFlow<CanvasNode, CanvasEdge>({ suspense: true })
+function generateEdgeId(): string {
+  return `edge-${Date.now()}-${++edgeCounter}`;
+}
 
-  const { screenToFlowPosition } = useReactFlow()
-  const wrapperRef = useRef<HTMLDivElement>(null)
+interface CanvasEditorProps {
+  pendingTemplate?: CanvasTemplate | null;
+  onTemplateImported?: () => void;
+}
+
+export function CanvasEditor({
+  pendingTemplate,
+  onTemplateImported,
+}: CanvasEditorProps) {
+  const { nodes, edges, onNodesChange, onEdgesChange } = useLiveblocksFlow<
+    CanvasNode,
+    CanvasEdge
+  >({ suspense: true });
+
+  const reactFlow = useReactFlow();
+  const { screenToFlowPosition, zoomIn, zoomOut, fitView } = reactFlow;
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  const nodesRef = useRef(nodes);
+  // eslint-disable-next-line react-hooks/refs
+  nodesRef.current = nodes;
+  const edgesRef = useRef(edges);
+  // eslint-disable-next-line react-hooks/refs
+  edgesRef.current = edges;
+
+  useEffect(() => {
+    if (!pendingTemplate) return;
+    const currentNodes = nodesRef.current;
+    const currentEdges = edgesRef.current;
+
+    onNodesChange([
+      ...currentNodes.map((nd) => ({ type: "remove" as const, id: nd.id })),
+      ...pendingTemplate.nodes.map((nd) => ({
+        type: "add" as const,
+        item: nd,
+      })),
+    ]);
+    onEdgesChange([
+      ...currentEdges.map((ed) => ({ type: "remove" as const, id: ed.id })),
+      ...pendingTemplate.edges.map((ed) => ({
+        type: "add" as const,
+        item: ed,
+      })),
+    ]);
+
+    onTemplateImported?.();
+    setTimeout(() => fitView({ duration: 300 }), 120);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingTemplate]);
+
+  const undo = useUndo();
+  const redo = useRedo();
+  const canUndo = useCanUndo();
+  const canRedo = useCanRedo();
+
+  useKeyboardShortcuts({ reactFlow, undo, redo });
+
+  const onConnect = useCallback(
+    (connection: Connection) => {
+      if (!connection.source || !connection.target) return;
+      onEdgesChange([
+        {
+          type: "add",
+          item: {
+            id: generateEdgeId(),
+            source: connection.source,
+            target: connection.target,
+            sourceHandle: connection.sourceHandle ?? null,
+            targetHandle: connection.targetHandle ?? null,
+            type: "canvasEdge",
+            data: { label: "" },
+            markerEnd: {
+              type: MarkerType.ArrowClosed,
+              color: "rgba(255,255,255,0.4)",
+              width: 16,
+              height: 16,
+            },
+          } as CanvasEdge,
+        },
+      ]);
+    },
+    [onEdgesChange],
+  );
 
   const onDragOver = useCallback((event: React.DragEvent) => {
-    event.preventDefault()
-    event.dataTransfer.dropEffect = "copy"
-  }, [])
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  }, []);
 
   const onDrop = useCallback(
     (event: React.DragEvent) => {
-      event.preventDefault()
+      event.preventDefault();
+      const raw = event.dataTransfer.getData("application/ghost-shape");
+      if (!raw) return;
 
-      const raw = event.dataTransfer.getData("application/ghost-shape")
-      if (!raw) return
-
-      let payload: { shape: NodeShape; size: { width: number; height: number } }
+      let payload: {
+        shape: NodeShape;
+        size: { width: number; height: number };
+      };
       try {
-        payload = JSON.parse(raw)
+        payload = JSON.parse(raw);
       } catch {
-        return
+        return;
       }
 
-      const position = screenToFlowPosition({ x: event.clientX, y: event.clientY })
+      const position = screenToFlowPosition({
+        x: event.clientX,
+        y: event.clientY,
+      });
 
-      const id = generateNodeId(payload.shape)
+      const id = generateNodeId(payload.shape);
       const newNode: CanvasNode = {
         id,
         type: "canvasNode",
         position,
-        data: { label: "", color: NODE_COLORS[0].fill, shape: payload.shape },
+        data: {
+          label: "",
+          color: NODE_COLORS[0].fill,
+          textColor: NODE_COLORS[0].text,
+          shape: payload.shape,
+        },
         width: payload.size.width,
         height: payload.size.height,
-      }
+      };
 
-      onNodesChange([{ type: "add", item: newNode }])
+      onNodesChange([{ type: "add", item: newNode }]);
     },
-    [screenToFlowPosition, onNodesChange]
-  )
+    [screenToFlowPosition, onNodesChange],
+  );
 
   return (
     <div
@@ -77,6 +189,8 @@ export function CanvasEditor() {
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         connectionMode={ConnectionMode.Loose}
+        connectionLineStyle={CONNECTION_LINE_STYLE}
+        connectionLineType={ConnectionLineType.SmoothStep}
         fitView
         className="bg-bg-base"
       >
@@ -86,13 +200,17 @@ export function CanvasEditor() {
           size={1.5}
           color="var(--color-border-subtle)"
         />
-        <MiniMap
-          className="bg-bg-surface! border! border-border-subtle! rounded-xl!"
-          maskColor="var(--color-bg-base)"
-          nodeColor="var(--color-accent-primary)"
-        />
       </ReactFlow>
+      <CanvasControls
+        onZoomIn={() => zoomIn({ duration: 200 })}
+        onZoomOut={() => zoomOut({ duration: 200 })}
+        onFitView={() => fitView({ duration: 200 })}
+        onUndo={undo}
+        onRedo={redo}
+        canUndo={canUndo}
+        canRedo={canRedo}
+      />
       <ShapePanel />
     </div>
-  )
+  );
 }
