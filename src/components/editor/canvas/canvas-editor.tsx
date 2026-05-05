@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
+import { useMyPresence } from "@liveblocks/react";
 import {
   ReactFlow,
   Background,
@@ -8,20 +9,28 @@ import {
   ConnectionMode,
   ConnectionLineType,
   MarkerType,
+  useNodes,
+  useEdges,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import type { Connection } from "@xyflow/react";
 import { useReactFlow } from "@xyflow/react";
+import type { Connection } from "@xyflow/react";
 import { useLiveblocksFlow } from "@liveblocks/react-flow";
-import { NODE_COLORS } from "@/types/canvas";
-import type { CanvasNode, CanvasEdge, NodeShape } from "@/types/canvas";
 import { useUndo, useRedo, useCanUndo, useCanRedo } from "@liveblocks/react";
+import type { CanvasNode, CanvasEdge, NodeShape } from "@/types/canvas";
+import { NODE_COLORS } from "@/types/canvas";
 import { CanvasNodeComponent } from "@/components/editor/canvas/canvas-node";
 import { CanvasEdgeComponent } from "@/components/editor/canvas/canvas-edge";
 import { ShapePanel } from "@/components/editor/canvas/shape-panel";
 import { CanvasControls } from "@/components/editor/canvas/canvas-controls";
+import { PresenceCursors } from "@/components/editor/canvas/presence-cursors";
+import { CollaboratorAvatars } from "@/components/editor/canvas/collaborator-avatars";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import type { CanvasTemplate } from "@/components/editor/starter-templates";
+import {
+  useCanvasAutosave,
+  type SaveStatus,
+} from "@/hooks/use-canvas-autosave";
 
 const nodeTypes = { canvasNode: CanvasNodeComponent };
 const edgeTypes = { canvasEdge: CanvasEdgeComponent };
@@ -44,18 +53,22 @@ function generateEdgeId(): string {
 }
 
 interface CanvasEditorProps {
+  projectId: string;
   pendingTemplate?: CanvasTemplate | null;
   onTemplateImported?: () => void;
+  onSaveStatusChange?: (status: SaveStatus) => void;
+  onSaveReady?: (saveFn: () => void) => void;
 }
 
 export function CanvasEditor({
+  projectId,
   pendingTemplate,
   onTemplateImported,
+  onSaveStatusChange,
+  onSaveReady,
 }: CanvasEditorProps) {
-  const { nodes, edges, onNodesChange, onEdgesChange } = useLiveblocksFlow<
-    CanvasNode,
-    CanvasEdge
-  >({ suspense: true });
+  const { nodes, edges, onNodesChange, onEdgesChange, onDelete } =
+    useLiveblocksFlow<CanvasNode, CanvasEdge>({ suspense: true });
 
   const reactFlow = useReactFlow();
   const { screenToFlowPosition, zoomIn, zoomOut, fitView } = reactFlow;
@@ -65,13 +78,12 @@ export function CanvasEditor({
   const edgesRef = useRef(edges);
 
   useEffect(() => {
-    nodesRef.current = nodes
-    edgesRef.current = edges
+    nodesRef.current = nodes;
+    edgesRef.current = edges;
   });
 
   useEffect(() => {
     if (!pendingTemplate) return;
-    
     const currentNodes = nodesRef.current;
     const currentEdges = edgesRef.current;
 
@@ -94,6 +106,94 @@ export function CanvasEditor({
     setTimeout(() => fitView({ duration: 300 }), 120);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingTemplate]);
+
+  const didLoadRef = useRef(false);
+  useEffect(() => {
+    if (didLoadRef.current) return;
+    didLoadRef.current = true;
+
+    if (nodesRef.current.length > 0 || edgesRef.current.length > 0) return;
+
+    fetch(`/api/projects/${projectId}/canvas`)
+      .then((res) => res.json())
+      .then(
+        ({
+          canvas,
+        }: {
+          canvas: { nodes: CanvasNode[]; edges: CanvasEdge[] } | null;
+        }) => {
+          if (!canvas) return;
+          if (canvas.nodes?.length) {
+            onNodesChange(
+              canvas.nodes.map((nd) => ({ type: "add" as const, item: nd })),
+            );
+          }
+          if (canvas.edges?.length) {
+            onEdgesChange(
+              canvas.edges.map((ed) => ({ type: "add" as const, item: ed })),
+            );
+          }
+          setTimeout(() => fitView({ duration: 300 }), 120);
+        },
+      )
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const { status: saveStatus, save } = useCanvasAutosave(
+    projectId,
+    nodes,
+    edges,
+  );
+
+  useEffect(() => {
+    onSaveStatusChange?.(saveStatus);
+  }, [saveStatus, onSaveStatusChange]);
+  useEffect(() => {
+    onSaveReady?.(save);
+  }, [save, onSaveReady]);
+
+  const rfNodes = useNodes<CanvasNode>();
+  const rfEdges = useEdges<CanvasEdge>();
+  const rfNodesRef = useRef(rfNodes);
+  const rfEdgesRef = useRef(rfEdges);
+  useEffect(() => {
+    rfNodesRef.current = rfNodes;
+    rfEdgesRef.current = rfEdges;
+  });
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      const target = e.target as HTMLElement;
+      if (
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable
+      )
+        return;
+      const selNodes = rfNodesRef.current.filter((n) => n.selected);
+      const selEdges = rfEdgesRef.current.filter((ed) => ed.selected);
+      if (selNodes.length || selEdges.length)
+        onDelete({ nodes: selNodes, edges: selEdges });
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onDelete]);
+
+  const [, updateMyPresence] = useMyPresence();
+
+  const onMouseMove = useCallback(
+    (event: React.MouseEvent) => {
+      updateMyPresence({
+        cursor: screenToFlowPosition({ x: event.clientX, y: event.clientY }),
+      });
+    },
+    [screenToFlowPosition, updateMyPresence],
+  );
+
+  const onMouseLeave = useCallback(() => {
+    updateMyPresence({ cursor: null });
+  }, [updateMyPresence]);
 
   const undo = useUndo();
   const redo = useRedo();
@@ -137,6 +237,7 @@ export function CanvasEditor({
   const onDrop = useCallback(
     (event: React.DragEvent) => {
       event.preventDefault();
+
       const raw = event.dataTransfer.getData("application/ghost-shape");
       if (!raw) return;
 
@@ -150,10 +251,14 @@ export function CanvasEditor({
         return;
       }
 
-      const position = screenToFlowPosition({
+      const center = screenToFlowPosition({
         x: event.clientX,
         y: event.clientY,
       });
+      const position = {
+        x: center.x - payload.size.width / 2,
+        y: center.y - payload.size.height / 2,
+      };
 
       const id = generateNodeId(payload.shape);
       const newNode: CanvasNode = {
@@ -181,6 +286,8 @@ export function CanvasEditor({
       className="relative h-full w-full"
       onDragOver={onDragOver}
       onDrop={onDrop}
+      onMouseMove={onMouseMove}
+      onMouseLeave={onMouseLeave}
     >
       <ReactFlow
         nodes={nodes}
@@ -193,7 +300,6 @@ export function CanvasEditor({
         connectionMode={ConnectionMode.Loose}
         connectionLineStyle={CONNECTION_LINE_STYLE}
         connectionLineType={ConnectionLineType.SmoothStep}
-        fitView
         className="bg-bg-base"
       >
         <Background
@@ -213,6 +319,34 @@ export function CanvasEditor({
         canRedo={canRedo}
       />
       <ShapePanel />
+      <PresenceCursors />
+      <CollaboratorAvatars />
+      <SaveStatusIndicator status={saveStatus} />
+    </div>
+  );
+}
+
+function SaveStatusIndicator({ status }: { status: SaveStatus }) {
+  if (status === "idle") return null;
+  
+  return (
+    <div className="pointer-events-none absolute bottom-16 left-1/2 -translate-x-1/2">
+      <span
+        className={
+          "rounded-full px-3 py-1 text-xs font-medium " +
+          (status === "saving"
+            ? "bg-bg-elevated text-text-faint"
+            : status === "saved"
+              ? "bg-bg-elevated text-text-secondary"
+              : "bg-bg-elevated text-red-400")
+        }
+      >
+        {status === "saving"
+          ? "Saving…"
+          : status === "saved"
+            ? "Saved"
+            : "Save failed"}
+      </span>
     </div>
   );
 }
