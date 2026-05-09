@@ -1,6 +1,7 @@
-import type { LiveMap, LiveObject } from "@liveblocks/client"
+import type { LiveMap, LiveObject, LiveList } from "@liveblocks/client"
 import type { LiveblocksNode, LiveblocksEdge } from "@liveblocks/react-flow"
 import type { CanvasNode, CanvasEdge } from "@/types/canvas"
+import type { AiChatMessage, AiStatusMessage } from "@/types/tasks"
 
 /* eslint-disable @typescript-eslint/no-empty-object-type */
 
@@ -15,6 +16,11 @@ declare global {
       flow: LiveObject<{
         nodes: LiveMap<string, LiveblocksNode<CanvasNode>>;
         edges: LiveMap<string, LiveblocksEdge<CanvasEdge>>;
+      }>;
+      aiChat: LiveList<AiChatMessage>;
+      aiStatus: LiveObject<{ 
+        latest?: AiStatusMessage;
+        aiPresence?: { x: number; y: number; thinking: boolean };
       }>;
     };
 
